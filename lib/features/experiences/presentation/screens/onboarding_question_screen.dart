@@ -31,6 +31,7 @@ class _OnboardingQuestionScreenState extends State<OnboardingQuestionScreen> {
   final TextEditingController _questionController = TextEditingController();
 
   String? _selectedMode; // 'audio' or 'video' or null
+  bool _pendingVideoRecording = false; // Track if user wants to record video
 
   @override
   void dispose() {
@@ -215,15 +216,23 @@ class _OnboardingQuestionScreenState extends State<OnboardingQuestionScreen> {
     
     final videoState = context.read<VideoRecordingBloc>().state;
     if (videoState is VideoCameraInitialized) {
+      // Camera is ready, start recording
+      _pendingVideoRecording = false;
       context.read<VideoRecordingBloc>().add(StartVideoRecording());
     } else {
-      // Wait for camera to initialize
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Camera is initializing. Please wait...'),
-          backgroundColor: AppColors.negative,
-        ),
-      );
+      // Initialize camera first, mark that we want to record when ready
+      _pendingVideoRecording = true;
+      context.read<VideoRecordingBloc>().add(InitializeCamera());
+      
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Initializing camera...'),
+            backgroundColor: AppColors.negative,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 
@@ -249,18 +258,44 @@ class _OnboardingQuestionScreenState extends State<OnboardingQuestionScreen> {
                     backgroundColor: AppColors.negative,
                   ),
                 );
+              } else if (state is AudioRecordingInitial) {
+                // Audio was deleted, reset mode to neutral
+                if (_selectedMode == 'audio') {
+                  setState(() {
+                    _selectedMode = null;
+                  });
+                }
               }
             },
           ),
           BlocListener<VideoRecordingBloc, VideoRecordingState>(
             listener: (context, state) {
               if (state is VideoRecordingError) {
+                _pendingVideoRecording = false;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(state.message),
                     backgroundColor: AppColors.negative,
                   ),
                 );
+              } else if (state is VideoCameraInitialized) {
+                if (_pendingVideoRecording) {
+                  // Camera initialized and user wants to record, start recording automatically
+                  _pendingVideoRecording = false;
+                  context.read<VideoRecordingBloc>().add(StartVideoRecording());
+                } else if (_selectedMode == 'video' && state.videoPath == null) {
+                  // Video was deleted (camera still initialized but no video), reset mode to neutral
+                  setState(() {
+                    _selectedMode = null;
+                  });
+                }
+              } else if (state is VideoRecordingInitial) {
+                // Video was deleted, reset mode to neutral
+                if (_selectedMode == 'video') {
+                  setState(() {
+                    _selectedMode = null;
+                  });
+                }
               }
             },
           ),
@@ -803,6 +838,11 @@ class _OnboardingQuestionScreenState extends State<OnboardingQuestionScreen> {
     final hasAudio = audioState.audioPath != null;
     final hasVideo = videoState.videoPath != null;
 
+    // Disable audio button if video is recording or video exists
+    final isAudioDisabled = isVideoRecording || hasVideo;
+    // Disable video button if audio is recording or audio exists
+    final isVideoDisabled = isAudioRecording || hasAudio;
+
     return Row(
       children: [
         // Mode selection buttons
@@ -814,19 +854,31 @@ class _OnboardingQuestionScreenState extends State<OnboardingQuestionScreen> {
                 child: _buildModeButton(
                   icon: Icons.mic,
                   isSelected: _selectedMode == 'audio',
-                  isDisabled: hasVideo, // Disable if video exists
-                  onTap: hasVideo
+                  isDisabled: isAudioDisabled,
+                  onTap: isAudioDisabled
                       ? () {
-                          // Show message to delete video first
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Please delete the video recording before switching to audio mode.',
+                          // Show appropriate message
+                          if (isVideoRecording) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Please stop the video recording before switching to audio mode.',
+                                ),
+                                backgroundColor: AppColors.negative,
+                                duration: Duration(seconds: 3),
                               ),
-                              backgroundColor: AppColors.negative,
-                              duration: Duration(seconds: 3),
-                            ),
-                          );
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Please delete the video recording before switching to audio mode.',
+                                ),
+                                backgroundColor: AppColors.negative,
+                                duration: Duration(seconds: 3),
+                              ),
+                            );
+                          }
                         }
                       : () {
                           if (_selectedMode == 'audio' && !isAudioRecording) {
@@ -854,19 +906,31 @@ class _OnboardingQuestionScreenState extends State<OnboardingQuestionScreen> {
                 child: _buildModeButton(
                   icon: Icons.videocam,
                   isSelected: _selectedMode == 'video',
-                  isDisabled: hasAudio, // Disable if audio exists
-                  onTap: hasAudio
+                  isDisabled: isVideoDisabled,
+                  onTap: isVideoDisabled
                       ? () {
-                          // Show message to delete audio first
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Please delete the audio recording before switching to video mode.',
+                          // Show appropriate message
+                          if (isAudioRecording) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Please stop the audio recording before switching to video mode.',
+                                ),
+                                backgroundColor: AppColors.negative,
+                                duration: Duration(seconds: 3),
                               ),
-                              backgroundColor: AppColors.negative,
-                              duration: Duration(seconds: 3),
-                            ),
-                          );
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Please delete the audio recording before switching to video mode.',
+                                ),
+                                backgroundColor: AppColors.negative,
+                                duration: Duration(seconds: 3),
+                              ),
+                            );
+                          }
                         }
                       : () {
                           if (_selectedMode == 'video' && !isVideoRecording) {

@@ -24,8 +24,8 @@ class VideoRecordingBloc extends Bloc<VideoRecordingEvent, VideoRecordingState> 
     on<ToggleVideoPlayback>(_onToggleVideoPlayback);
     on<UpdateVideoRecordingDuration>(_onUpdateVideoRecordingDuration);
 
-    // Initialize camera on startup
-    add(InitializeCamera());
+    // Camera will be initialized when user selects video mode and wants to record
+    // Do not initialize automatically on startup
   }
 
   Future<void> _onInitializeCamera(
